@@ -7,6 +7,93 @@ import io
 import base64
 from PIL import Image
 
+def generate_gate_pulses(t, rectifier_type):
+    """
+    Generate gate pulse signals for controlled rectifiers.
+    
+    Parameters:
+    -----------
+    t : array
+        Time array for simulation
+    rectifier_type : str
+        Type of rectifier being simulated
+        
+    Returns:
+    --------
+    gate_pulses : array or list of arrays
+        Gate pulse waveforms
+    """
+    # Get frequency from time array (assuming at least 2 cycles)
+    cycle_time = t[-1] / 2
+    frequency = 1 / cycle_time
+    omega = 2 * np.pi * frequency
+    
+    # Get firing angle from the rectifier type name (default to 30 degrees if not found)
+    import re
+    match = re.search(r'firing angle: (\d+)', rectifier_type.lower())
+    firing_angle = 30 if not match else int(match.group(1))
+    firing_time = np.deg2rad(firing_angle) / omega
+    
+    # Generate appropriate gate pulses based on rectifier type
+    if "Three-Phase" in rectifier_type:
+        # For three-phase controlled rectifier (6 SCRs)
+        gate_pulses = []
+        phase_shift = 2 * np.pi / 6  # 60 degrees phase shift between SCRs
+        
+        for i in range(6):
+            pulse = np.zeros_like(t)
+            for cycle in range(int(np.ceil(t[-1] * frequency))):
+                cycle_start = cycle / frequency
+                # Each SCR fires once per cycle with appropriate phase shift
+                trigger_time = cycle_start + firing_time + (i * phase_shift / omega)
+                pulse_width = 0.002  # 2ms pulse width
+                
+                # Set pulse high for the duration of the pulse width
+                pulse_indices = (t >= trigger_time) & (t < trigger_time + pulse_width)
+                pulse[pulse_indices] = 1.0
+            
+            gate_pulses.append(pulse)
+        
+        return gate_pulses
+    
+    elif "Half-Wave" in rectifier_type:
+        # For single-phase half-wave controlled rectifier (1 SCR)
+        pulse = np.zeros_like(t)
+        
+        for cycle in range(int(np.ceil(t[-1] * frequency))):
+            cycle_start = cycle / frequency
+            # SCR fires once per cycle
+            trigger_time = cycle_start + firing_time
+            pulse_width = 0.002  # 2ms pulse width
+            
+            # Set pulse high for the duration of the pulse width
+            pulse_indices = (t >= trigger_time) & (t < trigger_time + pulse_width)
+            pulse[pulse_indices] = 1.0
+        
+        return [pulse]
+    
+    else:  # Full-Wave Controlled
+        # For single-phase full-wave controlled rectifier (2 SCRs)
+        pulse1 = np.zeros_like(t)
+        pulse2 = np.zeros_like(t)
+        half_cycle = 1 / (2 * frequency)
+        
+        for cycle in range(int(np.ceil(t[-1] * frequency * 2))):
+            half_cycle_start = cycle * half_cycle
+            # Each SCR fires once per half-cycle, alternating
+            trigger_time = half_cycle_start + firing_time
+            pulse_width = 0.002  # 2ms pulse width
+            
+            # Set appropriate pulse high based on which half-cycle we're in
+            pulse_indices = (t >= trigger_time) & (t < trigger_time + pulse_width)
+            
+            if cycle % 2 == 0:
+                pulse1[pulse_indices] = 1.0
+            else:
+                pulse2[pulse_indices] = 1.0
+        
+        return [pulse1, pulse2]
+
 def calculate_metrics(input_voltage, output_voltage, output_current, load_resistance):
     """
     Calculate performance metrics for a rectifier circuit.
@@ -88,11 +175,21 @@ def plot_waveforms(t, input_voltage, output_voltage, output_current, rectifier_t
     rectifier_type : str
         Type of rectifier being simulated
     """
-    # Create subplots with 3 rows
-    fig = make_subplots(rows=3, cols=1, 
-                        subplot_titles=("Input Voltage", "Output Voltage", "Output Current"),
-                        shared_xaxes=True,
-                        vertical_spacing=0.1)
+    # Determine if we need to show gate pulses (for controlled rectifiers)
+    show_gate_pulses = "Controlled" in rectifier_type
+    
+    # Create subplots with appropriate number of rows
+    if show_gate_pulses:
+        fig = make_subplots(rows=4, cols=1, 
+                          subplot_titles=("Input Voltage", "Gate Pulses", "Output Voltage", "Output Current"),
+                          shared_xaxes=True,
+                          vertical_spacing=0.08,
+                          row_heights=[0.25, 0.15, 0.3, 0.3])
+    else:
+        fig = make_subplots(rows=3, cols=1, 
+                          subplot_titles=("Input Voltage", "Output Voltage", "Output Current"),
+                          shared_xaxes=True,
+                          vertical_spacing=0.1)
     
     # Plot input voltage
     if len(input_voltage.shape) > 1:  # For three-phase input
@@ -107,21 +204,55 @@ def plot_waveforms(t, input_voltage, output_voltage, output_current, rectifier_t
             row=1, col=1
         )
     
+    # Add gate pulses for controlled rectifiers
+    if show_gate_pulses:
+        # Generate gate pulses based on rectifier type
+        gate_pulses = generate_gate_pulses(t, rectifier_type)
+        
+        # Plot gate pulses
+        if "Three-Phase" in rectifier_type:
+            # For three-phase, show multiple gate signals
+            for i, pulse_name in enumerate(['SCR1', 'SCR2', 'SCR3', 'SCR4', 'SCR5', 'SCR6']):
+                # Offset each pulse for better visualization
+                offset = i * 0.2
+                fig.add_trace(
+                    go.Scatter(x=t, y=gate_pulses[i] + offset, name=pulse_name, line=dict(width=2)),
+                    row=2, col=1
+                )
+        else:
+            # For single-phase, show one or two gate signals
+            if "Half-Wave" in rectifier_type:
+                fig.add_trace(
+                    go.Scatter(x=t, y=gate_pulses[0], name="SCR Gate", line=dict(width=2, color='purple')),
+                    row=2, col=1
+                )
+            else:  # Full-Wave
+                fig.add_trace(
+                    go.Scatter(x=t, y=gate_pulses[0], name="SCR1 Gate", line=dict(width=2, color='purple')),
+                    row=2, col=1
+                )
+                fig.add_trace(
+                    go.Scatter(x=t, y=gate_pulses[1] + 0.2, name="SCR2 Gate", line=dict(width=2, color='darkblue')),
+                    row=2, col=1
+                )
+    
     # Plot output voltage
+    output_row = 3 if show_gate_pulses else 2
     fig.add_trace(
         go.Scatter(x=t, y=output_voltage, name="Output Voltage", line=dict(color='red')),
-        row=2, col=1
+        row=output_row, col=1
     )
     
     # Plot output current
+    output_row = 4 if show_gate_pulses else 3
     fig.add_trace(
         go.Scatter(x=t, y=output_current, name="Output Current", line=dict(color='green')),
-        row=3, col=1
+        row=output_row, col=1
     )
     
     # Update layout
     fig.update_layout(
-        height=700,
+        height=800 if show_gate_pulses else 700,
         title_text=f"{rectifier_type} Waveforms",
         legend=dict(
             orientation="h",
@@ -134,148 +265,18 @@ def plot_waveforms(t, input_voltage, output_voltage, output_current, rectifier_t
     
     # Update y-axis labels
     fig.update_yaxes(title_text="Voltage (V)", row=1, col=1)
-    fig.update_yaxes(title_text="Voltage (V)", row=2, col=1)
-    fig.update_yaxes(title_text="Current (A)", row=3, col=1)
     
-    # Update x-axis label
-    fig.update_xaxes(title_text="Time (s)", row=3, col=1)
+    if show_gate_pulses:
+        fig.update_yaxes(title_text="Gate Signal", row=2, col=1)
+        fig.update_yaxes(title_text="Voltage (V)", row=3, col=1)
+        fig.update_yaxes(title_text="Current (A)", row=4, col=1)
+        fig.update_xaxes(title_text="Time (s)", row=4, col=1)
+    else:
+        fig.update_yaxes(title_text="Voltage (V)", row=2, col=1)
+        fig.update_yaxes(title_text="Current (A)", row=3, col=1)
+        fig.update_xaxes(title_text="Time (s)", row=3, col=1)
     
     # Display the plot
     st.plotly_chart(fig, use_container_width=True)
 
-def plot_circuit_diagram(rectifier_type):
-    """
-    Display circuit diagram for the selected rectifier type.
-    
-    Parameters:
-    -----------
-    rectifier_type : str
-        Type of rectifier being simulated
-    """
-    # Create a matplotlib figure for the circuit diagram
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    # Remove axis ticks and labels
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_visible(False)
-    ax.spines['left'].set_visible(False)
-    
-    # Draw circuit diagram based on rectifier type
-    if rectifier_type == "Half-Wave Uncontrolled":
-        draw_half_wave_uncontrolled(ax)
-    elif rectifier_type == "Full-Wave Uncontrolled":
-        draw_full_wave_uncontrolled(ax)
-    elif rectifier_type == "Half-Wave Controlled":
-        draw_half_wave_controlled(ax)
-    elif rectifier_type == "Full-Wave Controlled":
-        draw_full_wave_controlled(ax)
-    elif rectifier_type == "Three-Phase Uncontrolled":
-        draw_three_phase_uncontrolled(ax)
-    elif rectifier_type == "Three-Phase Controlled":
-        draw_three_phase_controlled(ax)
-    
-    # Save figure to a buffer
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png')
-    buf.seek(0)
-    
-    # Display the image in Streamlit
-    st.image(buf, use_column_width=True)
-    plt.close(fig)
-
-# Helper functions to draw circuit diagrams
-def draw_half_wave_uncontrolled(ax):
-    ax.text(0.5, 0.5, """
-    AC Source                Diode                 Load
-        ~                     |>|                  /\/\/
-        |                      |                    |
-        |----------------------|--------------------| 
-        |                                           |
-        |-------------------------------------------|
-    """, fontsize=14, family='monospace')
-    ax.set_title("Half-Wave Uncontrolled Rectifier Circuit", fontsize=16)
-
-def draw_full_wave_uncontrolled(ax):
-    ax.text(0.5, 0.5, """
-                    |>|
-                 |------|
-                 |      |
-    AC Source    |      |     Load
-        ~        |      |    /\/\/
-        |        |      |     |
-        |--------|------|-----|
-        |        |      |     |
-        |        |      |     |
-                 |------|     
-                    |>|       
-    """, fontsize=14, family='monospace')
-    ax.set_title("Full-Wave Uncontrolled Rectifier Circuit (Bridge)", fontsize=16)
-
-def draw_half_wave_controlled(ax):
-    ax.text(0.5, 0.5, """
-    AC Source                SCR                  Load
-        ~                    /|                   /\/\/
-        |                   / |                    |
-        |-------------------  --------------------| 
-        |                                          |
-        |------------------------------------------|
-                           Gate
-                            |
-                            v
-    """, fontsize=14, family='monospace')
-    ax.set_title("Half-Wave Controlled Rectifier Circuit", fontsize=16)
-
-def draw_full_wave_controlled(ax):
-    ax.text(0.5, 0.5, """
-                    SCR1
-                     /|
-                 |---  |
-                 |      |
-    AC Source    |      |     Load
-        ~        |      |    /\/\/
-        |        |      |     |
-        |--------|------|-----|
-        |        |      |     |
-        |        |      |     |
-                 |---  |     
-                     /|       
-                    SCR2
-    """, fontsize=14, family='monospace')
-    ax.set_title("Full-Wave Controlled Rectifier Circuit", fontsize=16)
-
-def draw_three_phase_uncontrolled(ax):
-    ax.text(0.5, 0.5, """
-    Three-Phase Source         Diode Bridge            Load
-                                                      /\/\/
-        A o---------o----|>|----o----|>|----o---------o
-                    |                 |                |
-        B o---------|----o----|>|----o                |
-                    |    |                            |
-        C o---------|----|----|>|----o                |
-                    |    |         |                  |
-                    o----|---------|------------------o
-                         |         |
-                         o----|>|--o
-    """, fontsize=12, family='monospace')
-    ax.set_title("Three-Phase Uncontrolled Rectifier Circuit", fontsize=16)
-
-def draw_three_phase_controlled(ax):
-    ax.text(0.5, 0.5, """
-    Three-Phase Source         SCR Bridge             Load
-                                                     /\/\/
-        A o---------o----/|----o----/|----o---------o
-                    |                 |              |
-        B o---------|----o----/|----o                |
-                    |    |                           |
-        C o---------|----|----|/----o                |
-                    |    |         |                 |
-                    o----|---------|-----------------o
-                         |         |
-                         o----/|---o
-                         
-                         Gate Control
-    """, fontsize=12, family='monospace')
-    ax.set_title("Three-Phase Controlled Rectifier Circuit", fontsize=16)
+# Circuit diagram functions have been removed as requested

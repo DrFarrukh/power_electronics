@@ -19,8 +19,7 @@ from three_phase_rectifiers import (
 
 from utils import (
     calculate_metrics,
-    plot_waveforms,
-    plot_circuit_diagram
+    plot_waveforms
 )
 
 # Set page configuration
@@ -77,8 +76,8 @@ circuit_type = st.sidebar.selectbox(
 # Parameters common to all circuits
 frequency = st.sidebar.slider("Input Frequency (Hz)", 50, 60, 50)
 amplitude = st.sidebar.slider("Input Voltage Amplitude (V)", 100, 500, 220)
-load_resistance = st.sidebar.slider("Load Resistance (Ω)", 1, 100, 10)
-load_inductance = st.sidebar.slider("Load Inductance (mH)", 0, 100, 0)
+load_resistance = st.sidebar.slider("Load Resistance (Ω)", 100, 1000, 10)
+load_inductance = st.sidebar.slider("Load Inductance (mH)", 0, 1000, 0)
 
 # Time parameters for simulation
 cycles = st.sidebar.slider("Number of Cycles to Display", 1, 5, 2)
@@ -139,6 +138,7 @@ if circuit_type == "Single-Phase Rectifiers":
         input_voltage, output_voltage, output_current = simulate_half_wave_controlled(
             t, amplitude, frequency, firing_angle, load_resistance, load_inductance/1000
         )
+        rectifier_type = f"Half-Wave Controlled (Firing Angle: {firing_angle})"
         circuit_explanation = f"""
         ### Half-Wave Controlled Rectifier
         
@@ -160,6 +160,7 @@ if circuit_type == "Single-Phase Rectifiers":
         input_voltage, output_voltage, output_current = simulate_full_wave_controlled(
             t, amplitude, frequency, firing_angle, load_resistance, load_inductance/1000
         )
+        rectifier_type = f"Full-Wave Controlled (Firing Angle: {firing_angle})"
         circuit_explanation = f"""
         ### Full-Wave Controlled Rectifier
         
@@ -213,6 +214,7 @@ else:  # Three-Phase Rectifiers
         input_voltage, output_voltage, output_current = simulate_three_phase_controlled(
             t, amplitude, frequency, firing_angle, load_resistance, load_inductance/1000
         )
+        rectifier_type = f"Three-Phase Controlled (Firing Angle: {firing_angle})"
         circuit_explanation = f"""
         ### Three-Phase Controlled Rectifier
         
@@ -233,7 +235,7 @@ else:  # Three-Phase Rectifiers
 metrics = calculate_metrics(input_voltage, output_voltage, output_current, load_resistance)
 
 # Main content area with tabs
-tab1, tab2, tab3 = st.tabs(["Waveforms", "Circuit Diagram", "Theory"])
+tab1, tab2 = st.tabs(["Waveforms", "Theory"])
 
 with tab1:
     st.markdown("<h2 class='sub-header'>Waveform Analysis</h2>", unsafe_allow_html=True)
@@ -288,18 +290,9 @@ with tab1:
         st.markdown("</div>", unsafe_allow_html=True)
 
 with tab2:
-    st.markdown("<h2 class='sub-header'>Circuit Diagram</h2>", unsafe_allow_html=True)
-    
-    # Display circuit diagram
-    plot_circuit_diagram(rectifier_type)
-    
-    # Display circuit explanation
-    st.markdown("<div class='info-text'>", unsafe_allow_html=True)
-    st.markdown(circuit_explanation, unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-with tab3:
     st.markdown("<h2 class='sub-header'>Theoretical Background</h2>", unsafe_allow_html=True)
+
+    # Continue with the theory content
     
     st.markdown("""
     ### Rectifier Fundamentals
